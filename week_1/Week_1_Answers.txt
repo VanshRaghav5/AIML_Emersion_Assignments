@@ -1,122 +1,69 @@
-PHASE 1: DATA AUDITING (EDA)
+Phase 1: Data Auditing (EDA)
 
+Prior to fitting any model, the data needs to be inspected and quality issues identified.
+Dataset Structure :Use df.info() and df.shape to verify a dataframe of ~500k rows and ~30 columns. Make sure to check if numerical columns like productbaseprice, finalprice, totalamount, shipping_cost are numeric type and dates are cast to datetime object.
+Missing Values Check the percentage of missing values by using: (df.isnull().sum()/len(df))*100 Remove features having more than 40% of missing data Impute numerical missing data with median values Impute categorical missing values with mode values 
+Data Quality Check Look for impossible values like Negative price values,Negative quantity, Ratings outside range, negative delivery days and Unrealistic customer age
+Duplicate Records Remove duplicate order IDs,as the will skew metrics (total revenue, total quantity, percentage of returns etc.)
+Initial Insights Features that should need special attention- city (high cardinality) loyaltytier(ordinal) returnreason (might be mostly populated only for returned items) monetary features may contain outliers
 
-* Shape & Types: Run df.info() to confirm the 500k rows and 30 columns. Need to flag object types that should be numeric (like prices with '$' signs).
-* Missing Data: Run df.isnull().mean() * 100. If any column is missing >40% data, drop it. For the rest, use imputation.
-* Sanity Checks: Run df.describe() to catch impossible data like negative prices, negative quantities, or future dates.
-* Duplicates: Drop duplicate rows using df.drop_duplicates() so the metrics don't get skewed.
+Phase 2: Pricing Data Skewness Analysis Business hypothesizes that some of pricing related features are highly skewed and concentrated.
 
-PHASE 2: PRICE SKEWNESS
+Variables to Analyze- productbaseprice, finalprice, totalamount, customerlifetimevalue.
+Statistical Analysis Computeskewness for pricing-related variables using: df['total_amount'].skew() Understandingskewness: values close to 0 are symmetric, values between 0.5 and 1 are moderately skewed, values greater than 1 are highly skewed.
+Visualization Generate Histograms with KDE plots for pricing features Generate Boxplots for pricing features.
+Business Intuition is expected that most transactions will be in low and mid price range with a few extremely high price transactions.
+ML Implication As it's expected monetary related variables to be skewed, consider usingRobustScaler instead ofStandardScaler, also log transformations (e.g., np.log1p) can be used for extreme skewness.
 
-* Math Check: Use df['price'].skew(). If it is > 1, it's heavily right-skewed.
-* Plots: Plot a histogram with a KDE line and a boxplot. Expecting a huge spike at the lower end and a long tail of expensive outliers on the right.
-* ML Fix: Standard scaling won't work well here. Need to apply np.log1p() or use RobustScaler in the pipeline.
+Phase 3: Categorical Columns That Require Special Handling
 
-PHASE 3: FIXING CATEGORICAL COLUMNS
+High Cardinality Features city
+Challenge: High cardinality leads to a large number of dummy variables, which can increase model complexity and risk of overfitting.
+Solution: Use Target Encoding to represent the city based on its average target variable value.
+Ordinal Features loyalty_tier
+Challenge: The business hierarchy (Bronze < Silver < Gold < Platinum) is meaningful, but One-Hot Encoding would discard this ranking.
+Solution: Use Ordinal Encoding to preserve the order of loyalty tiers.
+Nominal Features - category - subcategory - paymentmethod - shippingmethod - customergender - country Solution: Use One-Hot Encoding.
+Data Cleaning Standardize categorical text values before encoding to prevent the same category from being represented multiple times due to formatting issues (e.g., capitalization, leading/trailing spaces).
+df['city'] = df['city'].str.lower().str.strip()
 
-* High Cardinality (City): One-hot encoding thousands of cities will break memory. Fix: Use Target Encoding instead.
-* Ordinal Data (Loyalty_Tier): One-hot encoding loses the rank order (Gold > Silver > Bronze). Fix: Use OrdinalEncoder.
-* Dirty Strings: Variations like "NY", "ny", and "New York " mess up grouping. Fix: Run .str.lower().strip() before encoding.
+Phase 4: Understanding Product Returns
 
-PHASE 4: RETURN PATTERNS
+Target Variable: is_returned
+The main goal of this phase is to analyze various features that are most likely to explain the product returns and can provide actionable business insights.
+Category Analysis - Analyze return rate by category. - Analyze return rate by sub_category. - Business Question: Which product categories have the highest return rates?
+Loyalty Tier Analysis - Analyze return rates across different loyalty_tiers (Bronze, Silver, Gold, Platinum). - Business Question: Do loyalty program members have lower return rates?
+Delivery Analysis - Analyze the relationship between daystodeliver and is_returned. - Business Question: Do deliveries with longer delivery times result in more returns?
+Pricing Analysis - Analyze the relationship between totalamount, finalprice, and discountpercentage with isreturned. - Business Question: Are heavily discounted or low-priced items returned more frequently?
+Customer Behavior Analysis - Analyze the impact of customerlifetimevalue, isfirstpurchase, sessiondurationmins, pagesviewed on isreturned. - Business Question: Are first-time buyers more likely to return products?
+Return Reasons - Analyze the frequency of different return_reason values. - Business Question: What are the most common reasons for product returns?
 
-* Categories: Check return rates per category. Clothing usually has higher returns than electronics due to size issues.
-* Pricing/Discounts: Test if heavy discount items or super expensive luxury items trigger more returns.
-* Seasonality: Group by month to check for spikes (like January post-holiday returns).
+Phase 5: Feature Engineering Pipeline
 
-PHASE 5: FEATURE ENGINEERING PIPELINE
+The preprocessing pipeline will include the following transformations to prepare the data for machine learning: Standard Scaling - Apply to numerical features that are not expected to contain significant outliers: quantity, rating, numreviews, customerage, pagesviewed, clicksto_purchase.
+Robust Scaling - Apply to numerical features that are expected to have outliers: productbaseprice, finalprice, totalamount, shippingcost, customerlifetimevalue, sessionduration_mins.
+One-Hot Encoding - Apply to nominal categorical features: category, subcategory, paymentmethod, shippingmethod, customergender, country, isfirstpurchase.
+Ordinal Encoding - Apply to the ordinal categorical feature: loyalty_tier.
+Target Encoding - Apply to the high cardinality categorical feature: city. This will encode the city based on the average value of the is_returned target.
 
-from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import (
-    StandardScaler,
-    RobustScaler,
-    OneHotEncoder,
-    OrdinalEncoder
-)
-from category_encoders import TargetEncoder
+Phase 6: Correlation Analysis and Predictive Features
 
-preprocessor = ColumnTransformer(
-    transformers=[
-
-        # Normally distributed numeric features
-        ('num', Pipeline([
-            ('imp', SimpleImputer(strategy='median')),
-            ('scale', StandardScaler())
-        ]), [
-            'quantity',
-            'rating',
-            'num_reviews',
-            'customer_age',
-            'pages_viewed',
-            'clicks_to_purchase'
-        ]),
-
-        # Skewed monetary features
-        ('skew_num', Pipeline([
-            ('imp', SimpleImputer(strategy='median')),
-            ('scale', RobustScaler())
-        ]), [
-            'product_base_price',
-            'final_price',
-            'total_amount',
-            'shipping_cost',
-            'customer_lifetime_value',
-            'session_duration_mins'
-        ]),
-
-        # Nominal categorical features
-        ('cat', Pipeline([
-            ('imp', SimpleImputer(strategy='most_frequent')),
-            ('ohe', OneHotEncoder(
-                drop='first',
-                handle_unknown='ignore'
-            ))
-        ]), [
-            'category',
-            'sub_category',
-            'payment_method',
-            'shipping_method',
-            'customer_gender',
-            'country',
-            'is_first_purchase'
-        ]),
-
-        # Ordinal feature
-        ('ord', Pipeline([
-            ('imp', SimpleImputer(
-                strategy='constant',
-                fill_value='Bronze'
-            )),
-            ('ord', OrdinalEncoder(
-                categories=[[
-                    'Bronze',
-                    'Silver',
-                    'Gold',
-                    'Platinum'
-                ]]
-            ))
-        ]), [
-            'loyalty_tier'
-        ]),
-
-        # High cardinality feature
-        ('high_card', Pipeline([
-            ('imp', SimpleImputer(
-                strategy='most_frequent'
-            )),
-            ('te', TargetEncoder())
-        ]), [
-            'city'
-        ])
-
-    ],
-    remainder='drop'
-)
-
-PHASE 6: CORRELATIONS & PREDICTORS
-
-* Multicollinearity: Run df.corr() for a Pearson matrix. If features like discount_amount and discount_idx correlate > 0.85, drop one to avoid redundancy.
-* Quick Tests: Run Chi-Square tests to see which categorical features actually have a relationship with the return status.
-* Feature Importance: Train a quick baseline Random Forest model on the processed data and pull .feature_importances_ to rank the top predictors.
+This phase involves understanding feature interdependencies and identifying the most impactful predictors for product returns.
+Correlation Analysis
+- Calculate and visualize the Pearson correlation matrix for all numerical features (including scaled ones).
+- Identify any strongly correlated features that might indicate redundancy or require careful consideration in model selection.
+Statistical Tests
+- Perform Chi-Square tests to assess the statistical significance of relationships between categorical features (category, paymentmethod, shippingmethod, loyaltytier) and the binary target variable (isreturned).
+- These tests will help determine which categorical variables are meaningful predictors of returns.
+Feature Importance
+- Train a baseline machine learning model (e.g., Random Forest Classifier or Gradient Boosting Classifier) on the preprocessed data.
+- Extract and analyze the feature importance scores from the trained model.
+- Identify the features that contribute most to the model's ability to predict returns.
+- Expected high-impact predictors might include: daystodeliver, discountpercentage, customerlifetimevalue, loyaltytier, category, isfirstpurchase, totalamount, shippingmethod.
+Final Business Goal
+The ultimate objective is to leverage the insights gained from this analysis and the trained predictive model to help RetailIQ:
+ - Reduce overall return rates.
+ - Enhance customer satisfaction by addressing return drivers proactively.
+ - Optimize shipping operations to minimize delays and related returns.
+ - Improve targeting strategies for loyalty programs.
+ - Ultimately, increase overall profitability.
