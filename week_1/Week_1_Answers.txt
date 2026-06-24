@@ -29,36 +29,89 @@ PHASE 5: FEATURE ENGINEERING PIPELINE
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import StandardScaler, RobustScaler, OneHotEncoder, OrdinalEncoder
+from sklearn.preprocessing import (
+    StandardScaler,
+    RobustScaler,
+    OneHotEncoder,
+    OrdinalEncoder
+)
 from category_encoders import TargetEncoder
 
 preprocessor = ColumnTransformer(
     transformers=[
+
+        # Normally distributed numeric features
         ('num', Pipeline([
-            ('imp', SimpleImputer(strategy='median')), 
+            ('imp', SimpleImputer(strategy='median')),
             ('scale', StandardScaler())
-        ]), ['quantity']),
-        
+        ]), [
+            'quantity',
+            'rating',
+            'num_reviews',
+            'customer_age',
+            'pages_viewed',
+            'clicks_to_purchase'
+        ]),
+
+        # Skewed monetary features
         ('skew_num', Pipeline([
-            ('imp', SimpleImputer(strategy='median')), 
+            ('imp', SimpleImputer(strategy='median')),
             ('scale', RobustScaler())
-        ]), ['price']),
-        
+        ]), [
+            'product_base_price',
+            'final_price',
+            'total_amount',
+            'shipping_cost',
+            'customer_lifetime_value',
+            'session_duration_mins'
+        ]),
+
+        # Nominal categorical features
         ('cat', Pipeline([
-            ('imp', SimpleImputer(strategy='most_frequent')), 
-            ('ohe', OneHotEncoder(drop='first', handle_unknown='ignore'))
-        ]), ['payment_method']),
-        
+            ('imp', SimpleImputer(strategy='most_frequent')),
+            ('ohe', OneHotEncoder(
+                drop='first',
+                handle_unknown='ignore'
+            ))
+        ]), [
+            'category',
+            'sub_category',
+            'payment_method',
+            'shipping_method',
+            'customer_gender',
+            'country',
+            'is_first_purchase'
+        ]),
+
+        # Ordinal feature
         ('ord', Pipeline([
-            ('imp', SimpleImputer(strategy='constant', fill_value='None')), 
-            ('ord', OrdinalEncoder(categories=[['None', 'Bronze', 'Silver', 'Gold']]))
-        ]), ['loyalty_tier']),
-        
+            ('imp', SimpleImputer(
+                strategy='constant',
+                fill_value='Bronze'
+            )),
+            ('ord', OrdinalEncoder(
+                categories=[[
+                    'Bronze',
+                    'Silver',
+                    'Gold',
+                    'Platinum'
+                ]]
+            ))
+        ]), [
+            'loyalty_tier'
+        ]),
+
+        # High cardinality feature
         ('high_card', Pipeline([
-            ('imp', SimpleImputer(strategy='most_frequent')), 
+            ('imp', SimpleImputer(
+                strategy='most_frequent'
+            )),
             ('te', TargetEncoder())
-        ]), ['city'])
-    ], 
+        ]), [
+            'city'
+        ])
+
+    ],
     remainder='drop'
 )
 
