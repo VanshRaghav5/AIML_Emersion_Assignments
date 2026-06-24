@@ -1,0 +1,69 @@
+PHASE 1: DATA AUDITING (EDA)
+
+
+* Shape & Types: Run df.info() to confirm the 500k rows and 30 columns. Need to flag object types that should be numeric (like prices with '$' signs).
+* Missing Data: Run df.isnull().mean() * 100. If any column is missing >40% data, drop it. For the rest, use imputation.
+* Sanity Checks: Run df.describe() to catch impossible data like negative prices, negative quantities, or future dates.
+* Duplicates: Drop duplicate rows using df.drop_duplicates() so the metrics don't get skewed.
+
+PHASE 2: PRICE SKEWNESS
+
+* Math Check: Use df['price'].skew(). If it is > 1, it's heavily right-skewed.
+* Plots: Plot a histogram with a KDE line and a boxplot. Expecting a huge spike at the lower end and a long tail of expensive outliers on the right.
+* ML Fix: Standard scaling won't work well here. Need to apply np.log1p() or use RobustScaler in the pipeline.
+
+PHASE 3: FIXING CATEGORICAL COLUMNS
+
+* High Cardinality (City): One-hot encoding thousands of cities will break memory. Fix: Use Target Encoding instead.
+* Ordinal Data (Loyalty_Tier): One-hot encoding loses the rank order (Gold > Silver > Bronze). Fix: Use OrdinalEncoder.
+* Dirty Strings: Variations like "NY", "ny", and "New York " mess up grouping. Fix: Run .str.lower().strip() before encoding.
+
+PHASE 4: RETURN PATTERNS
+
+* Categories: Check return rates per category. Clothing usually has higher returns than electronics due to size issues.
+* Pricing/Discounts: Test if heavy discount items or super expensive luxury items trigger more returns.
+* Seasonality: Group by month to check for spikes (like January post-holiday returns).
+
+PHASE 5: FEATURE ENGINEERING PIPELINE
+
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler, RobustScaler, OneHotEncoder, OrdinalEncoder
+from category_encoders import TargetEncoder
+
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('num', Pipeline([
+            ('imp', SimpleImputer(strategy='median')), 
+            ('scale', StandardScaler())
+        ]), ['quantity']),
+        
+        ('skew_num', Pipeline([
+            ('imp', SimpleImputer(strategy='median')), 
+            ('scale', RobustScaler())
+        ]), ['price']),
+        
+        ('cat', Pipeline([
+            ('imp', SimpleImputer(strategy='most_frequent')), 
+            ('ohe', OneHotEncoder(drop='first', handle_unknown='ignore'))
+        ]), ['payment_method']),
+        
+        ('ord', Pipeline([
+            ('imp', SimpleImputer(strategy='constant', fill_value='None')), 
+            ('ord', OrdinalEncoder(categories=[['None', 'Bronze', 'Silver', 'Gold']]))
+        ]), ['loyalty_tier']),
+        
+        ('high_card', Pipeline([
+            ('imp', SimpleImputer(strategy='most_frequent')), 
+            ('te', TargetEncoder())
+        ]), ['city'])
+    ], 
+    remainder='drop'
+)
+
+PHASE 6: CORRELATIONS & PREDICTORS
+
+* Multicollinearity: Run df.corr() for a Pearson matrix. If features like discount_amount and discount_idx correlate > 0.85, drop one to avoid redundancy.
+* Quick Tests: Run Chi-Square tests to see which categorical features actually have a relationship with the return status.
+* Feature Importance: Train a quick baseline Random Forest model on the processed data and pull .feature_importances_ to rank the top predictors.
